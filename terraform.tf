@@ -8,7 +8,10 @@ terraform {
 }
 
 # Configure the AWS Provider
-provider "aws" {}
+provider "aws" {
+  region  = "ap-south-1"
+  profile = "routparesh"
+}
 
 resource "aws_security_group" "deepseek_sg" {
   name        = "deepseek_sg"
