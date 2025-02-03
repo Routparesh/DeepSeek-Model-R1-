@@ -29,13 +29,32 @@ resource "aws_security_group" "deepseek_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
+
+resource "aws_iam_role" "deepseek_role" {
+  name = "Deep-seek-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_instance_profile" "deepseek_instance_profile" {
+  name = "Deep-seek-instance-profile"
+  role = aws_iam_role.deepseek_role.name
+}
 resource "aws_instance" "deepseek_model" {
   ami           = "ami-00bb6a80f01f03502"
   instance_type = "g4dn.xlarge"
   key_name      = "my-key"
   security_groups = [aws_security_group.deepseek_sg.name]
   
-  iam_instance_profile = "Deep-seek"
+  iam_instance_profile = aws_iam_instance_profile.deepseek_instance_profile.name
   tags = {
     Name = "DeepSeekModelR1"
   }
