@@ -62,5 +62,3 @@ jobs:
         run: |
           curl http://$(terraform output lb_url)/8080
           curl http://$(terraform output lb_url)/8080
-
-#
