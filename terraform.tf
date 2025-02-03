@@ -49,6 +49,7 @@ resource "aws_lb_listener" "deepseek_listener" {
     fixed_response {
       status_code = 200
       message_body = "Welcome to DeepSeek Model!"
+      content_type = "text/plain"
     }
   }
 }
