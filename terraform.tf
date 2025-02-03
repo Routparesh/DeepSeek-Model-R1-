@@ -48,10 +48,16 @@ resource "aws_iam_instance_profile" "deepseek_instance_profile" {
   name = "Deep-seek-instance-profile"
   role = aws_iam_role.deepseek_role.name
 }
+
+resource "aws_key_pair" "my_key" {
+  key_name   = "my-key"
+  public_key = file("~/.ssh/id_rsa.pub")  # Use the path to your existing public key
+}
+
 resource "aws_instance" "deepseek_model" {
   ami           = "ami-00bb6a80f01f03502"
   instance_type = "g4dn.xlarge"
-  key_name      = "my-key"
+  key_name      = aws_key_pair.my_key.key_name
   security_groups = [aws_security_group.deepseek_sg.name]
   
   iam_instance_profile = aws_iam_instance_profile.deepseek_instance_profile.name
