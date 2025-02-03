@@ -35,7 +35,7 @@ resource "aws_instance" "deepseek_model" {
   key_name      = "my-key"
   security_groups = [aws_security_group.deepseek_sg.name]
   
-  iam_instance_profile = "deepseek-model-iam-profile"
+  iam_instance_profile = "Deep-seek"
   tags = {
     Name = "DeepSeekModelR1"
   }
