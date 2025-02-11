@@ -56,7 +56,7 @@ resource "aws_instance" "deepseek_model" {
   key_name      = "my-key"
   security_groups = [aws_security_group.deepseek_sg.name]
   
-  iam_instance_profile = aws_iam_instance_profile.deepseek_instance_profile.name
+  iam_instance_profile =  aws_iam_instance_profile.deepseek_instance_profile.name
   tags = {
     Name = "DeepSeekModelR1"
   }
@@ -90,4 +90,3 @@ resource "aws_lb_listener" "deepseek_listener" {
   }
 }
 
-##
