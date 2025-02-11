@@ -58,7 +58,8 @@ jobs:
         id: ec2-details
         run: |
           EC2_PUBLIC_IP=$(terraform output -raw ec2_public_ip)
-          echo "::set-output name=public_ip::$EC2_PUBLIC_IP"
+          echo "public_ip=${EC2_PUBLIC_IP}" >> $GITHUB_OUTPUT
+          echo "lb_dns=$(terraform output -raw load_balancer_dns)" >> $GITHUB_OUTPUT
 
       - name: Prepare SSH Key
         run: |

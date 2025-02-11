@@ -72,15 +72,28 @@ resource "aws_iam_instance_profile" "deepseek_instance_profile" {
 }
 
 resource "aws_instance" "deepseek_model" {
-  ami           = "ami-00bb6a80f01f03502"  # Update with latest Ubuntu AMI
-  instance_type = "g4dn.xlarge"
+  # Note: Request a vCPU quota increase for g4dn.xlarge from AWS Support
+  # Current quota is 0, which prevents launching GPU instances
+  # Recommended actions:
+  # 1. Visit AWS Service Quotas
+  # 2. Request quota increase for g4dn.xlarge in ap-south-1
+  # 3. Specify use case: Machine Learning model deployment
+  
+  ami           = "ami-00bb6a80f01f03502"  # Ubuntu 22.04 LTS
+  instance_type = "t2.large"  # Temporary smaller instance
   key_name      = "my-key"
   
   vpc_security_group_ids = [aws_security_group.deepseek_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.deepseek_instance_profile.name
   
+  root_block_device {
+    volume_size = 50  # Increased storage for model
+    volume_type = "gp3"
+  }
+  
   tags = {
     Name = "DeepSeekModelR1-${random_string.resource_suffix.result}"
+    Purpose = "Temporary Instance - Awaiting GPU Quota Increase"
   }
 }
 
