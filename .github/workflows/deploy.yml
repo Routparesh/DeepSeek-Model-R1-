@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - master
+
 env:
   AWS_REGION: ap-south-1
   AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
@@ -18,66 +19,107 @@ jobs:
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.5.7
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Init
         run: terraform init
+        continue-on-error: false
 
-      - name: Terraform format
+      - name: Terraform Format
         id: fmt
-        run: terraform fmt
+        run: terraform fmt -check
+        continue-on-error: false
 
-      - name: Terraform validate
+      - name: Terraform Validate
         id: validate
         run: terraform validate
+        continue-on-error: false
 
-      - name: Terraform plan
+      - name: Terraform Plan
         id: plan
-        run: terraform plan -no-color -input=false -out planfile
+        run: |
+          terraform plan \
+            -no-color \
+            -input=false \
+            -out=tfplan
         continue-on-error: true
 
-      - name: Terraform plan status
+      - name: Terraform Plan Status
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve tfplan
 
-      - name: Install Docker on EC2
+      - name: Get EC2 Instance Details
+        id: ec2-details
         run: |
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ secrets.EC2_PUBLIC_IP }} <<EOF
+          EC2_PUBLIC_IP=$(terraform output -raw ec2_public_ip)
+          echo "::set-output name=public_ip::$EC2_PUBLIC_IP"
+
+      - name: Prepare SSH Key
+        run: |
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > my-key.pem
+          chmod 600 my-key.pem
+
+      - name: Stop Existing Containers
+        run: |
+          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.ec2-details.outputs.public_ip }} <<EOF
+          docker stop deepseek-webui || true
+          docker stop deepseek-model || true
+          docker rm deepseek-webui || true
+          docker rm deepseek-model || true
+          EOF
+
+      - name: Install Docker
+        run: |
+          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.ec2-details.outputs.public_ip }} <<EOF
           sudo apt-get update
           sudo apt-get install -y docker.io
           sudo systemctl enable docker
           sudo systemctl start docker
-          EOF
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ secrets.EC2_PUBLIC_IP }} <<EOF
-          sudo apt-get update
-          sudo apt-get install -y docker.io
-          sudo systemctl enable docker
-          sudo systemctl start docker
+          sudo usermod -aG docker ubuntu
           EOF
 
-      - name: Run DeepSeek Model and WebUI via Docker
+      - name: Pull Docker Images
         run: |
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ secrets.EC2_PUBLIC_IP }} <<EOF
-          docker run -d -p 8080:8080 --name deepseek-webui openwebui/ollama-webui
-          docker run -d --name deepseek-model deepseek-model:latest
-          EOF
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ secrets.EC2_PUBLIC_IP }} <<EOF
-          docker run -d -p 8080:8080 --name deepseek-webui openwebui/ollama-webui
-          docker run -d --name deepseek-model deepseek-model:latest
+          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.ec2-details.outputs.public_ip }} <<EOF
+          docker pull openwebui/ollama-webui
+          docker pull deepseek-model:latest
           EOF
 
-      - name: Confirm WebUI is Running
+      - name: Run DeepSeek Model and WebUI
         run: |
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ secrets.EC2_PUBLIC_IP }} <<EOF
-          curl http://localhost:8080
-          EOF
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ secrets.EC2_PUBLIC_IP }} <<EOF
-          curl http://localhost:8080
+          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.ec2-details.outputs.public_ip }} <<EOF
+          docker run -d \
+            -p 8080:8080 \
+            --name deepseek-webui \
+            --restart unless-stopped \
+            openwebui/ollama-webui
+          
+          docker run -d \
+            --name deepseek-model \
+            --restart unless-stopped \
+            deepseek-model:latest
           EOF
 
-      - name: Confirm Load Balancer is Exposing the WebUI
+      - name: Verify WebUI Deployment
         run: |
-          curl http://$(terraform output lb_url)/8080
-          curl http://$(terraform output lb_url)/8080
+          sleep 30  # Wait for containers to start
+          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.ec2-details.outputs.public_ip }} <<EOF
+          docker ps | grep deepseek-webui
+          docker ps | grep deepseek-model
+          curl -f http://localhost:8080 || exit 1
+          EOF
+
+      - name: Cleanup SSH Key
+        if: always()
+        run: rm -f my-key.pem
