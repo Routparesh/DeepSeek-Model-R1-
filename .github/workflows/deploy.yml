@@ -34,12 +34,10 @@ jobs:
         continue-on-error: false
 
       - name: Terraform Validate
-        id: validate
         run: terraform validate
         continue-on-error: false
 
       - name: Terraform Plan
-        id: plan
         run: |
           terraform plan \
             -no-color \
@@ -47,19 +45,22 @@ jobs:
             -out=tfplan
         continue-on-error: true
 
-      - name: Terraform Plan Status
-        if: steps.plan.outcome == 'failure'
-        run: exit 1
-
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan
 
-      - name: Get EC2 Instance Details
-        id: ec2-details
+      - name: Extract Terraform Outputs
+        id: tf-outputs
         run: |
-          EC2_PUBLIC_IP=$(terraform output -raw ec2_public_ip)
-          echo "public_ip=${EC2_PUBLIC_IP}" >> $GITHUB_OUTPUT
-          echo "lb_dns=$(terraform output -raw load_balancer_dns)" >> $GITHUB_OUTPUT
+          EC2_PUBLIC_IP=$(terraform output -raw ec2_public_ip || echo "")
+          LB_DNS=$(terraform output -raw load_balancer_dns || echo "")
+          
+          if [ -z "$EC2_PUBLIC_IP" ]; then
+            echo "Failed to retrieve EC2 public IP"
+            exit 1
+          fi
+          
+          echo "EC2_PUBLIC_IP=$EC2_PUBLIC_IP" >> $GITHUB_OUTPUT
+          echo "LB_DNS=$LB_DNS" >> $GITHUB_OUTPUT
 
       - name: Prepare SSH Key
         run: |
@@ -68,7 +69,7 @@ jobs:
 
       - name: Stop Existing Containers
         run: |
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.ec2-details.outputs.public_ip }} <<EOF
+          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.tf-outputs.outputs.EC2_PUBLIC_IP }} <<EOF
           docker stop deepseek-webui || true
           docker stop deepseek-model || true
           docker rm deepseek-webui || true
@@ -77,7 +78,7 @@ jobs:
 
       - name: Install Docker
         run: |
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.ec2-details.outputs.public_ip }} <<EOF
+          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.tf-outputs.outputs.EC2_PUBLIC_IP }} <<EOF
           sudo apt-get update
           sudo apt-get install -y docker.io
           sudo systemctl enable docker
@@ -87,14 +88,14 @@ jobs:
 
       - name: Pull Docker Images
         run: |
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.ec2-details.outputs.public_ip }} <<EOF
+          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.tf-outputs.outputs.EC2_PUBLIC_IP }} <<EOF
           docker pull openwebui/ollama-webui
           docker pull deepseek-model:latest
           EOF
 
       - name: Run DeepSeek Model and WebUI
         run: |
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.ec2-details.outputs.public_ip }} <<EOF
+          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.tf-outputs.outputs.EC2_PUBLIC_IP }} <<EOF
           docker run -d \
             -p 8080:8080 \
             --name deepseek-webui \
@@ -110,7 +111,7 @@ jobs:
       - name: Verify WebUI Deployment
         run: |
           sleep 30  # Wait for containers to start
-          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.ec2-details.outputs.public_ip }} <<EOF
+          ssh -o StrictHostKeyChecking=no -i my-key.pem ubuntu@${{ steps.tf-outputs.outputs.EC2_PUBLIC_IP }} <<EOF
           docker ps | grep deepseek-webui
           docker ps | grep deepseek-model
           curl -f http://localhost:8080 || exit 1
@@ -119,3 +120,9 @@ jobs:
       - name: Cleanup SSH Key
         if: always()
         run: rm -f my-key.pem
+
+      - name: Output Deployment Information
+        run: |
+          echo "Deployment Complete"
+          echo "EC2 Public IP: ${{ steps.tf-outputs.outputs.EC2_PUBLIC_IP }}"
+          echo "Load Balancer DNS: ${{ steps.tf-outputs.outputs.LB_DNS }}"
